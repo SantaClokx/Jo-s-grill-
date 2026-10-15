@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Outfit } from "next/font/google";
+import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
 import { CartProvider } from "@/components/cart-provider";
@@ -9,16 +9,20 @@ import { ToastProvider } from "@/components/toast";
 import { site } from "@/lib/site";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
+// Fonts are self-hosted in public/fonts so the production build never depends
+// on reaching Google's font CDN. A failed fetch there breaks the Vercel build.
+const inter = localFont({
+  src: "../../public/fonts/inter-latin.woff2",
   variable: "--font-inter",
   display: "swap",
+  weight: "100 900",
 });
 
-const outfit = Outfit({
-  subsets: ["latin"],
+const outfit = localFont({
+  src: "../../public/fonts/outfit-latin.woff2",
   variable: "--font-outfit",
   display: "swap",
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
