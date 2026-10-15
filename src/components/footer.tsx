@@ -107,8 +107,13 @@ export function Footer() {
 
       <div className="border-t border-line">
         <div className="shell flex flex-col items-center justify-between gap-2 py-6 text-xs text-muted sm:flex-row">
-          <p>© <CopyrightYear /> JO&apos;S Grill. All rights reserved.</p>
-          <p>Delivery within Rivers State ₦1,000 · Outside Rivers State ₦5,000</p>
+          <p className="text-center sm:text-left">
+            © <CopyrightYear /> JO&apos;S Grill. All rights reserved.
+          </p>
+          <p>Website by SNT Studios</p>
+          <p className="text-center sm:text-right">
+            Delivery within Rivers State ₦1,000 · Outside Rivers State ₦5,000
+          </p>
         </div>
       </div>
     </footer>
