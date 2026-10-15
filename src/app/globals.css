@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #fff8ed;
+  --color-cream-deep: #ffeccd;
+  --color-ink: #171717;
+  --color-ink-soft: #3d3d3d;
+  --color-muted: #6f6f6f;
+  --color-line: #eadfce;
+  --color-brand: #e6392f;
+  --color-brand-dark: #c02a21;
+  --color-orange: #ff9f1c;
+  --color-green: #20b15a;
+  --color-green-dark: #178a46;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-display: var(--font-outfit), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-card: 0 1px 2px rgba(23, 23, 23, 0.04), 0 12px 32px -12px rgba(93, 50, 28, 0.18);
+  --shadow-lift: 0 18px 46px -16px rgba(93, 50, 28, 0.32);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}
+
+/* Shared horizontal rhythm so every section aligns on mobile and desktop. */
+.shell {
+  width: min(1120px, 92%);
+  margin-inline: auto;
+}
+
+/* Visible, consistent focus ring for keyboard users across the site. */
+:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
