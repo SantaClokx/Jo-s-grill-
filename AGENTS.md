@@ -48,5 +48,20 @@ no Firebase, no third-party backend.
   material.** Do not add them. The only verified contact channels are the phone
   number and WhatsApp. `site.hoursNote` must not be replaced with a guess.
 
+### Build must not depend on the network
+
+`src/app/layout.tsx` uses `next/font/local` with the files in `public/fonts/`.
+Do **not** switch to `next/font/google`: it downloads fonts during `next build`,
+and a failed fetch aborts the build. This caused a real deployment failure.
+`tests/fonts.test.ts` guards against a regression.
+
+### Vercel blocks commits from unaffiliated authors
+
+On the Hobby plan, Vercel refuses to build a commit whose **author** lacks
+contributing access to the project, and private repositories cannot add
+collaborators. Commits authored by `openhands <openhands@all-hands.dev>` are
+therefore blocked. Commits must be authored by the repository owner
+(`SantaClokx`). See `docs/DEPLOYMENT.md` § 7.
+
 See `docs/BACKEND-REQUIREMENTS.md` and `docs/DEPLOYMENT.md` for the planned
 backend and Vercel setup.

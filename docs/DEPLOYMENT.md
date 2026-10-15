@@ -8,12 +8,19 @@ Prefetching.
 > Do not state otherwise until a deployment has actually succeeded and the live
 > URL has been tested.
 
+> **Current blocker.** Vercel refuses to build commits whose author lacks
+> contributing access to the project. See
+> [Blocked deployments](#7-blocked-deployments-commit-author) below.
+
 ---
 
 ## 1. Import the repository
 
+The GitHub repository is `SantaClokx/Jo-s-grill-` (private). Note the name:
+GitHub strips apostrophes, so `jo's-grill` becomes `Jo-s-grill-`.
+
 1. In the Vercel dashboard, choose **Add New → Project**.
-2. Import the `jos-grill` GitHub repository.
+2. Import the `SantaClokx/Jo-s-grill-` GitHub repository.
 3. Vercel detects Next.js automatically. Keep the defaults.
 
 ## 2. Build settings
@@ -86,4 +93,67 @@ After the first successful deployment, check on the live URL:
   `POST /api/orders` runs as a serverless function. No configuration needed.
 - **Node runtime:** the order endpoint uses standard Web APIs and runs on the
   default Node runtime.
+- **Fonts are self-hosted.** `src/app/layout.tsx` uses `next/font/local` with the
+  files in `public/fonts/`. Do not switch back to `next/font/google`: it
+  downloads fonts during `next build`, and a failed fetch aborts the build. That
+  is what caused an earlier deployment failure.
+  `tests/fonts.test.ts` guards against a regression.
 - **Custom domain:** add it under **Settings → Domains** once DNS is ready.
+
+## 7. Blocked deployments (commit author)
+
+Vercel refuses to build a commit whose **author** does not have contributing
+access to the project. The error reads:
+
+> The deployment was blocked because the commit author did not have contributing
+> access to the project on Vercel. The Hobby Plan does not support collaboration
+> for private repositories.
+
+The Hobby plan cannot add collaborators to a **private** repository, so this
+cannot be fixed by inviting the author. There are three ways forward:
+
+### Option A — make the repository public (free)
+
+Hobby-plan collaboration restrictions apply to private repositories. A public
+repository has no such restriction, so the existing commits build as-is. This
+exposes the source code, which is acceptable for a brochure site with no secrets,
+but it is the owner's call.
+
+### Option B — let only the owner's account author the commits (free)
+
+If commits are authored by the account that owns the Vercel project
+(`SantaClokx`), the block does not apply. Configure Git before committing:
+
+```bash
+git config user.name  "SantaClokx"
+git config user.email "santus4jah@gmail.com"
+```
+
+Then amend or recommit. Because the author is part of the commit hash, amending
+rewrites history and requires a force-push:
+
+```bash
+git rebase --root --exec 'git commit --amend --no-edit --reset-author'
+git push --force-with-lease origin main
+```
+
+> The email must match a verified address on the GitHub account, otherwise GitHub
+> will not attribute the commit to the owner and Vercel will still block it.
+
+### Option C — upgrade to Vercel Pro (paid)
+
+Pro supports collaboration on private repositories, so the author can be added as
+a team member and the commits build unchanged.
+
+### Chosen approach
+
+**Option B.** The repository stays private and no plan upgrade is needed. Only the
+repository owner should run the rewrite, so that the commits are attributed to
+their own account.
+
+After the rewrite, confirm the author is correct before pushing:
+
+```bash
+git log -1 --format='%an <%ae>'
+```
+
