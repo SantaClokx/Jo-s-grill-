@@ -147,13 +147,30 @@ a team member and the commits build unchanged.
 
 ### Chosen approach
 
-**Option B.** The repository stays private and no plan upgrade is needed. Only the
-repository owner should run the rewrite, so that the commits are attributed to
-their own account.
+**Option A — the repository is public.** This was chosen by the owner after being
+told that a public repository exposes all source code, and that visibility cannot
+be restored once the code has been forked or mirrored.
 
-After the rewrite, confirm the author is correct before pushing:
+Before the change was made, the full git history was scanned for credentials.
+The scan found no real secrets: the only match was the commented-out placeholder
+`# DATABASE_URL="postgres://user:password@host:5432/jos_grill"` in
+`.env.example`, which is an example string, not a credential.
 
-```bash
-git log -1 --format='%an <%ae>'
-```
+> **The integration used to push code cannot change repository visibility.**
+> `PATCH /repos/{owner}/{repo}` with `{"private": false}` returns
+> `403 Resource not accessible by integration`, even though the token reports
+> `admin: true` on the repository. Changing visibility requires the repository
+> owner to act in the GitHub UI:
+> **Settings → General → Danger Zone → Change repository visibility → Public**.
+
+Because the repository is public, the admin dashboard's security must not depend
+on source secrecy. See [`ADMIN-SECURITY.md`](ADMIN-SECURITY.md).
+
+### Rejected alternatives
+
+- **Option B — owner authors the commits.** Keeps the repository private, but
+  fixes only existing commits; every subsequent agent-authored commit is blocked
+  again, so the project cannot progress.
+- **Option C — Vercel Pro.** Also keeps the repository private and allows
+  agent-authored commits to deploy, at a recurring cost.
 
