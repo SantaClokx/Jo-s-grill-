@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { useCart } from "@/components/cart-provider";
 import { Button, ButtonLink, ExternalButton } from "@/components/ui/button";
@@ -29,6 +29,19 @@ const EMPTY_CUSTOMER: DeliveryDetails = {
   notes: "",
 };
 
+/**
+ * A random key identifying one checkout attempt. The server stores it and treats
+ * a repeat as the same order, so a double-submit does not create two orders.
+ * Crypto is used when available; the fallback is still sufficient to avoid an
+ * accidental collision.
+ */
+function createIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function CheckoutForm() {
   const { items, count, subtotal, isHydrated, clear } = useCart();
   const [customer, setCustomer] = useState<DeliveryDetails>(EMPTY_CUSTOMER);
@@ -36,6 +49,13 @@ export function CheckoutForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<OrderResponse | null>(null);
+
+  /**
+   * A stable key for one checkout attempt. It is created once and reused on
+   * retry so a double-submit (or an impatient second tap) cannot create two
+   * orders. Cleared only when a new order is started.
+   */
+  const idempotencyKey = useRef<string>(createIdempotencyKey());
 
   const pricing = useMemo(
     () => calculatePricing(subtotal, customer.state || "Rivers"),
@@ -47,7 +67,15 @@ export function CheckoutForm() {
   }
 
   if (result) {
-    return <OrderConfirmation result={result} onStartNew={clear} />;
+    return (
+      <OrderConfirmation
+        result={result}
+        onStartNew={() => {
+          clear();
+          idempotencyKey.current = createIdempotencyKey();
+        }}
+      />
+    );
   }
 
   if (items.length === 0) {
@@ -91,6 +119,7 @@ export function CheckoutForm() {
         body: JSON.stringify({
           customer,
           lines: items.map((line) => ({ itemId: line.item.id, quantity: line.quantity })),
+          idempotencyKey: idempotencyKey.current,
         }),
       });
 
@@ -342,7 +371,11 @@ function OrderConfirmation({
     <div className="mx-auto max-w-2xl">
       <SuccessState
         title={`Order ${order.reference} received`}
-        description="We've validated your order and calculated your total. The final step is to send it to the restaurant on WhatsApp so they can start cooking."
+        description={
+          persisted
+            ? "Your order has been recorded and your total is confirmed. Send it to the restaurant on WhatsApp so they can start cooking."
+            : "We've validated your order and calculated your total. The final step is to send it to the restaurant on WhatsApp so they can start cooking."
+        }
       >
         <div className="mx-auto max-w-md text-left">
           <dl className="space-y-2 rounded-2xl border border-line bg-white p-5 text-sm">

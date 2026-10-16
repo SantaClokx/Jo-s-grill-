@@ -91,6 +91,28 @@ Do not "simplify" the admin page by removing its self-guard or `instant = false`
 — a live build/curl check confirms that doing so leaks admin markup to anonymous
 visitors.
 
+### Database (Neon PostgreSQL + Drizzle)
+
+- Order storage is Neon PostgreSQL via Drizzle ORM. It is **not** an auth
+  provider — Clerk owns identity. Never add Supabase Auth, Firebase, or a second
+  auth system.
+- `DATABASE_URL` is server-only. Never prefix it `NEXT_PUBLIC_`, never commit a
+  real value. `.env*` is git-ignored except `.env.example`.
+- The site must keep working with **no** database. `/api/orders` returns
+  `persisted: false` and the admin order API returns 503. Never make a page or a
+  build depend on database reachability.
+- `persisted: true` may only be returned after a successful commit. Never
+  describe an order as "saved" otherwise.
+- `clerk_user_id` is written from server-side `auth()` only, never from the
+  request body. There is no `users` table; do not mirror Clerk into the database.
+- Migrations live in `drizzle/` and are committed. Write them with
+  `npm run db:generate`; apply with `npm run db:migrate` (idempotent). Do not
+  hand-edit generated SQL unless correcting a generation bug.
+- Integration tests in `tests/db/` require `DATABASE_URL` and skip without it, so
+  `npm test` stays database-free. Run them with `npm run db:verify`.
+- See `docs/DATABASE.md` for the schema, security properties and Clerk↔Neon
+  relationship.
+
 ### Vercel blocks commits from unaffiliated authors
 
 On the Hobby plan, Vercel refuses to build a commit whose **author** lacks

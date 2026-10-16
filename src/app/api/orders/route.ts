@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { calculatePricing } from "@/lib/delivery";
 import { getMenuItem } from "@/lib/menu";
 import { createOrderId, createOrderReference } from "@/lib/order-id";
+import { persistValidatedOrder } from "@/lib/orders/persist";
 import { isNonEmptyString } from "@/lib/sanitise";
 import { validateCheckout } from "@/lib/validation";
 import type { CartLine, DeliveryDetails, Order } from "@/types";
@@ -10,14 +11,23 @@ import type { CartLine, DeliveryDetails, Order } from "@/types";
 export interface CreateOrderResponse {
   order: Order;
   /**
-   * Whether this order has been durably stored. `false` until a database is
-   * configured - the client must not tell the customer their order is saved.
+   * Whether this order has been durably stored. `false` whenever the database
+   * is not configured or the write failed - the client must not tell the
+   * customer their order is saved unless this is `true`.
    */
   persisted: boolean;
   /** Whether the order was delivered to the restaurant's order channel. */
   deliveredToRestaurant: boolean;
   /** Customer-safe status message describing exactly what happened. */
   message: string;
+}
+
+/** An idempotency key is optional and only ever used as a string. */
+function readIdempotencyKey(record: Record<string, unknown>): string | null {
+  const value = record.idempotencyKey;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed.slice(0, 64);
 }
 
 function parseBody(body: unknown): { customer: DeliveryDetails; lines: CartLine[] } | null {
@@ -80,6 +90,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const idempotencyKey = readIdempotencyKey(body as Record<string, unknown>);
+
   // Re-price on the server from the catalogue so a tampered client cannot
   // dictate prices. Unknown items are rejected rather than silently ignored.
   const lines: Order["lines"] = [];
@@ -124,15 +136,22 @@ export async function POST(request: Request) {
     pricing,
   };
 
-  // NOTE: No database is configured yet, so the order is NOT stored anywhere.
-  // We still return a fully validated, correctly priced order so the customer
-  // can complete checkout via the restaurant's live WhatsApp channel.
-  const response: CreateOrderResponse = {
+  // Persist when a database is configured. `persistValidatedOrder` returns an
+  // honest `persisted` flag: it is true only after the write actually commits.
+  // If storage is unavailable the order is still valid and priced, and the
+  // customer is directed to WhatsApp, so checkout never blocks on the database.
+  const { order: finalOrder, persisted, notice } = await persistValidatedOrder(
     order,
-    persisted: false,
+    idempotencyKey,
+  );
+
+  const response: CreateOrderResponse = {
+    order: finalOrder,
+    persisted,
     deliveredToRestaurant: false,
     message:
-      "Order validated and priced. It has not been stored on a server yet - complete your order using the WhatsApp button.",
+      notice ??
+      "Your order has been received and stored. Please send it on WhatsApp so the restaurant can start cooking.",
   };
 
   return NextResponse.json(response, { status: 201 });

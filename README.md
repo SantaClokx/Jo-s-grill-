@@ -23,23 +23,33 @@ before going live.
 | Cart with persistence in the browser | Working |
 | Delivery fee rules (₦1,000 Rivers / ₦5,000 outside) | Working, enforced on the server |
 | Server-side validation and re-pricing | Working |
-| **Order storage (database)** | **Not implemented — see below** |
+| **Order storage (database)** | **Implemented (Neon PostgreSQL) — needs a connection string to activate** |
 | **Payment collection** | **Not implemented — see below** |
 | Admin dashboard | Not built (planned for a later phase) |
+| Admin order API (read + status) | Implemented, Clerk-protected |
 
-### Important: orders are not stored yet
+### Order storage
 
-There is **no database**. The order endpoint validates the request, re-prices it
-from the server-side catalogue, and returns the confirmed order — but it does
-**not** save it anywhere. The API response says so explicitly:
+Order storage is implemented with **Neon PostgreSQL** and Drizzle ORM. The schema,
+migrations and query layer are complete and were verified against a real
+PostgreSQL server (see [`docs/DATABASE.md`](docs/DATABASE.md)).
+
+It is not yet *active*: no Neon connection string is configured. The behaviour
+depends on `DATABASE_URL`:
+
+- **Set** — the order is written in a transaction and the response contains
+  `"persisted": true`. The order and its lines are stored together.
+- **Unset or unreachable** — the order is validated and priced as before and the
+  response contains `"persisted": false` with an explanation. The customer is
+  directed to WhatsApp. Checkout never blocks on the database.
 
 ```json
+{ "persisted": true,  "deliveredToRestaurant": false }
 { "persisted": false, "deliveredToRestaurant": false }
 ```
 
-The checkout screen tells the customer the same thing and directs them to the
-WhatsApp button, which is the live, working order channel today. **Do not
-describe orders as "saved" or "recorded" until a database is connected.**
+The API reports `persisted: true` **only after a successful commit**. Do not
+describe an order as "saved" unless the response says so.
 
 ### Important: no payment is collected
 
@@ -55,6 +65,8 @@ Paystack or Flutterwave) and the backend work described in
 - **Next.js 16** (App Router, Turbopack) with **React 19**
 - **TypeScript** (strict)
 - **Tailwind CSS v4** — design tokens defined in `src/app/globals.css`
+- **Clerk** — authentication for the admin area
+- **Neon PostgreSQL** with **Drizzle ORM** — order storage
 - **Node's built-in test runner** — no extra test dependency
 - No Supabase, no Firebase, no third-party backend services
 
@@ -82,6 +94,9 @@ Open <http://localhost:3000>.
 | `npm run typecheck` | TypeScript, no emit |
 | `npm test` | Unit tests |
 | `npm run check` | lint + typecheck + tests |
+| `npm run db:generate` | Write a new SQL migration from a schema change |
+| `npm run db:migrate` | Apply pending migrations to `DATABASE_URL` |
+| `npm run db:verify` | Database integration tests (needs `DATABASE_URL`) |
 
 ---
 

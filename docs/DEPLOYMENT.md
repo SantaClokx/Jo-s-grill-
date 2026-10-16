@@ -40,17 +40,18 @@ rule is needed.
 
 ## 3. Environment variables
 
-**No environment variables are required for the current build.** The site has no
-database, no payment provider and no image host, so there is nothing to configure
-yet.
+Authentication (Clerk) and order storage (Neon PostgreSQL) both read from the
+environment. Set these in **Settings → Environment Variables**:
 
-When a backend is added (see [`BACKEND-REQUIREMENTS.md`](BACKEND-REQUIREMENTS.md)),
-set each variable in **Settings → Environment Variables** and scope it correctly:
+| Variable | Scope | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | browser-safe (public by design) | Clerk admin auth. |
+| `CLERK_SECRET_KEY` | server only | Clerk. Never `NEXT_PUBLIC_`. |
+| `DATABASE_URL` | server only | Neon **pooled** connection string. Never `NEXT_PUBLIC_`. |
 
-- `DATABASE_URL` — server only (order storage)
-- `PAYMENT_SECRET_KEY` — server only
-- `PAYMENT_WEBHOOK_SECRET` — server only
-- `NEXT_PUBLIC_PAYMENT_PUBLIC_KEY` — safe for the browser (public keys only)
+Without Clerk keys, the public site works and the admin area is denied (503).
+Without `DATABASE_URL`, the site works and orders are not stored
+(`persisted: false`). Both degrade safely; neither takes the site down.
 
 Rules that must not be broken:
 
@@ -60,6 +61,22 @@ Rules that must not be broken:
   secret behind that prefix.
 
 To pull variables for local work: `vercel env pull .env.local`.
+
+### Applying migrations
+
+Migrations are committed in `drizzle/`. Apply them once per environment:
+
+```bash
+DATABASE_URL="postgresql://…" npm run db:migrate
+```
+
+This is **idempotent** — safe to rerun, and safe to wire into a deploy step. It
+exits non-zero on failure so a pipeline stops rather than serving against an
+unmigrated schema. It logs neither the connection string nor any data.
+
+You may run it from your machine against the Neon database, or add it to the
+build command. It is not run automatically by `next build`, so that a build never
+depends on database reachability.
 
 ## 4. Deployment protection
 
@@ -82,8 +99,9 @@ After the first successful deployment, check on the live URL:
 - [ ] Adding items updates the cart badge.
 - [ ] Checkout with a Rivers State address shows a ₦1,000 delivery fee.
 - [ ] Checkout with a non-Rivers address shows a ₦5,000 delivery fee.
-- [ ] `POST /api/orders` responds with `persisted: false` (honest until a database
-      exists).
+- [ ] `POST /api/orders` responds with `persisted: true` once `DATABASE_URL` is
+      set (and `persisted: false`, honestly, when it is not).
+- [ ] An order row appears in the database after checkout, with its lines.
 - [ ] Layout holds up at 360 px width (mobile) through desktop.
 - [ ] No secrets appear in the deployed bundle.
 

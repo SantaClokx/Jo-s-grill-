@@ -11,35 +11,22 @@ end-to-end.
 
 ---
 
-## 1. Order storage (database) — required
+## 1. Order storage (database) — implemented
 
-**What is missing.** There is no persistence layer. `POST /api/orders` validates
-and prices an order, then returns it without saving. `persisted: false` in the
-response is the machine-readable truth of this.
+**Status.** Persistence is implemented with **Neon PostgreSQL** via Drizzle ORM.
+The schema, migrations and query layer are in the repository and were verified
+against a real PostgreSQL server. See [`DATABASE.md`](DATABASE.md).
 
-**Why it matters.** Without storage there is no order history, no kitchen queue,
-no status tracking, and no data for the future admin dashboard. Orders live only
-in the customer's browser until they send the WhatsApp message.
+It becomes active when `DATABASE_URL` is set. Until then `/api/orders` continues
+to return `persisted: false` and the WhatsApp handoff remains the live channel.
 
-**What is needed before choosing a provider.** Decide:
+Remaining before real orders are taken: provisioning Neon, applying migrations,
+and completing the security checklist in § 5 below — in particular a rate limit
+on `POST /api/orders` and a retention decision for customer personal data.
 
-- **Where the data lives.** A managed Postgres (Neon, Supabase Postgres, Railway,
-  Vercel Postgres) or a hosted NoSQL store. Serverless-friendly with connection
-  pooling is strongly preferred because Vercel functions are short-lived.
-- **Schema.** Minimum tables/collections:
-  - `orders` — id, reference, created_at, status, subtotal, delivery_fee, total,
-    state, is_within_rivers
-  - `order_items` — order_id, item_id, name, unit_price, quantity
-  - `customers` (optional, can be denormalised onto `orders`) — name, phone,
-    city, address, notes
-- **Retention and privacy.** Customer name, phone and address are personal data.
-  Decide how long they are kept and who can read them.
-- **Access.** The public site must only ever *insert* orders. Reads belong to the
-  admin dashboard, behind authentication.
-
-**Once a database exists:** set `persisted: true` in the API response only when
-the write has actually succeeded, and update the checkout success copy
-accordingly. The current copy must stay until then.
+There is no order history UI yet: order reads are exposed by the Clerk-protected
+`/api/admin/orders` endpoint, and the dashboard that consumes it is still to be
+built.
 
 ---
 
