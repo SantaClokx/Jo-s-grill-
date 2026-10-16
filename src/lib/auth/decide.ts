@@ -1,5 +1,5 @@
+import { ADMIN_ROLE, isClerkConfigured, isSysAdminEmail } from "./config.ts";
 import { hasAdminRole, type AuthContext } from "./authorization.ts";
-import { isClerkConfigured } from "./config.ts";
 
 /**
  * The administrator access decision, as a pure function.
@@ -63,4 +63,27 @@ export function evaluateAdminAccess(input: {
 /** Convenience wrapper reading configuration from the environment. */
 export function decideAdminAccess(context: AuthContext): AdminGuardResult {
   return evaluateAdminAccess({ configured: isClerkConfigured(), context });
+}
+
+/**
+ * Apply the server-side administrator allow-list.
+ *
+ * If the account is signed in, does not already carry an administrator role in
+ * its metadata, and its **verified** email is on the `ADMIN_EMAILS` allow-list,
+ * the context is elevated to carry the administrator role.
+ *
+ * The email is supplied by the caller from the server-verified Clerk session;
+ * it is never taken from the request body. Keeping this pure means the
+ * elevation rule is unit tested directly, with no SDK or environment mocking
+ * beyond setting the allow-list.
+ */
+export function applyAdminAllowList(
+  context: AuthContext,
+  sessionEmail: string | null | undefined,
+): AuthContext {
+  if (!context.isAuthenticated || !context.userId) return context;
+  if (hasAdminRole(context.publicMetadata)) return context;
+  if (!isSysAdminEmail(sessionEmail)) return context;
+
+  return { ...context, publicMetadata: { role: ADMIN_ROLE } };
 }

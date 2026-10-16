@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { AdminSessionControls } from "@/components/admin/admin-session-controls";
 import { requireAdmin } from "@/lib/auth/guard";
 
 /**
@@ -78,5 +79,15 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     );
   }
 
-  return <>{children}</>;
+  return (
+    <div className="mx-auto w-full max-w-4xl px-6 py-10">
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <Link href="/admin" className="text-sm font-bold uppercase tracking-wide text-ink/60">
+          JO&apos;S Grill admin
+        </Link>
+        <AdminSessionControls />
+      </div>
+      {children}
+    </div>
+  );
 }

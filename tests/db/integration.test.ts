@@ -12,6 +12,7 @@ import {
   OrderRepositoryError,
   pingDatabase,
   recordAudit,
+  transitionOrderStatus,
   updateOrderStatus,
 } from "../../src/lib/db/orders.ts";
 import { createOrderId, createOrderReference } from "../../src/lib/order-id.ts";
@@ -128,6 +129,67 @@ suite("database integration", () => {
 
   it("UPDATE: returns null when the order does not exist", async () => {
     assert.equal(await updateOrderStatus("JG-MISSING", "delivered"), null);
+  });
+
+  it("TRANSITION: applies an allowed step and reports it as updated", async () => {
+    const { order } = await trackedCreate();
+    const result = await transitionOrderStatus(order.reference, "confirmed");
+
+    assert.equal(result.outcome, "updated");
+    if (result.outcome === "updated") assert.equal(result.order.status, "confirmed");
+
+    const reread = await getOrderByReference(order.reference);
+    assert.equal(reread?.status, "confirmed");
+  });
+
+  it("TRANSITION: reports not_found for an unknown reference", async () => {
+    const result = await transitionOrderStatus("JG-MISSING", "confirmed");
+    assert.equal(result.outcome, "not_found");
+  });
+
+  it("TRANSITION: refuses to skip ahead and leaves the row unchanged", async () => {
+    const { order } = await trackedCreate();
+    const result = await transitionOrderStatus(order.reference, "delivered");
+
+    assert.equal(result.outcome, "invalid_transition");
+    if (result.outcome === "invalid_transition") assert.equal(result.from, "received");
+
+    const reread = await getOrderByReference(order.reference);
+    assert.equal(reread?.status, "received");
+  });
+
+  it("TRANSITION: a terminal order cannot be moved onward", async () => {
+    const { order } = await trackedCreate();
+    await transitionOrderStatus(order.reference, "confirmed");
+    await transitionOrderStatus(order.reference, "preparing");
+    await transitionOrderStatus(order.reference, "delivered");
+
+    const result = await transitionOrderStatus(order.reference, "preparing");
+    assert.equal(result.outcome, "invalid_transition");
+    if (result.outcome === "invalid_transition") assert.equal(result.from, "delivered");
+  });
+
+  it("TRANSITION: a repeated status is a harmless no-op", async () => {
+    const { order } = await trackedCreate();
+    const result = await transitionOrderStatus(order.reference, "received");
+    assert.equal(result.outcome, "updated");
+    if (result.outcome === "updated") assert.equal(result.order.status, "received");
+  });
+
+  it("TRANSITION: a stale update loses the race instead of overwriting", async () => {
+    const { order } = await trackedCreate();
+
+    // First caller moves received -> confirmed.
+    const first = await transitionOrderStatus(order.reference, "confirmed");
+    assert.equal(first.outcome, "updated");
+
+    // A second caller acting on the now-stale "received" view must not be able
+    // to jump straight to delivered (that step is only valid from "preparing").
+    const second = await transitionOrderStatus(order.reference, "delivered");
+    assert.equal(second.outcome, "invalid_transition");
+
+    const reread = await getOrderByReference(order.reference);
+    assert.equal(reread?.status, "confirmed");
   });
 
   it("LIST: returns orders newest first and respects the status filter", async () => {

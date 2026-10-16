@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireAdmin } from "@/lib/auth/guard";
+import { guardFailureResponse, requireAdmin } from "@/lib/auth/guard";
 
 /**
  * Protected admin API endpoint.
@@ -16,9 +16,7 @@ import { requireAdmin } from "@/lib/auth/guard";
 export async function GET() {
   const result = await requireAdmin();
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.message }, { status: result.status });
-  }
+  if (!result.ok) return guardFailureResponse(result);
 
   return NextResponse.json({
     ok: true,

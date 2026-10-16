@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import { ADMIN_ROLE } from "../src/lib/auth/config.ts";
-import { evaluateAdminAccess } from "../src/lib/auth/decide.ts";
+import { applyAdminAllowList, evaluateAdminAccess } from "../src/lib/auth/decide.ts";
 import {
   extractRole,
   hasAdminRole,
@@ -209,5 +209,69 @@ describe("Clerk session to auth context", () => {
     const result = evaluateAdminAccess({ configured: false, context: admin });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, "misconfigured");
+  });
+});
+
+/**
+ * The administrator allow-list, applied to the verified session.
+ *
+ * This proves the elevation rule end to end at the decision layer: an allow-listed
+ * email becomes an administrator, and nothing else does. The email always comes
+ * from the caller's session, so a request body can never influence it.
+ */
+describe("administrator allow-list elevation", () => {
+  const KEY = "ADMIN_EMAILS";
+  const previous = process.env[KEY];
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env[KEY];
+    else process.env[KEY] = previous;
+  });
+
+  const signedInNoRole: AuthContext = {
+    isAuthenticated: true,
+    userId: "user_owner",
+    publicMetadata: null,
+  };
+
+  it("grants access to the allow-listed email", () => {
+    process.env[KEY] = "santus4jah@gmail.com";
+    const elevated = applyAdminAllowList(signedInNoRole, "santus4jah@gmail.com");
+    const result = evaluateAdminAccess({ configured: true, context: elevated });
+    assert.equal(result.ok, true);
+  });
+
+  it("denies an unrelated verified email", () => {
+    process.env[KEY] = "santus4jah@gmail.com";
+    const elevated = applyAdminAllowList(signedInNoRole, "someone@example.com");
+    const result = evaluateAdminAccess({ configured: true, context: elevated });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "forbidden");
+  });
+
+  it("grants nothing when the allow-list is unset", () => {
+    delete process.env[KEY];
+    const elevated = applyAdminAllowList(signedInNoRole, "santus4jah@gmail.com");
+    assert.equal(evaluateAdminAccess({ configured: true, context: elevated }).ok, false);
+  });
+
+  it("does not elevate a signed-out context", () => {
+    process.env[KEY] = "santus4jah@gmail.com";
+    const elevated = applyAdminAllowList(signedOut, "santus4jah@gmail.com");
+    assert.equal(elevated.isAuthenticated, false);
+    assert.equal(hasAdminRole(elevated.publicMetadata), false);
+  });
+
+  it("does not elevate when the session carries no email", () => {
+    process.env[KEY] = "santus4jah@gmail.com";
+    assert.equal(hasAdminRole(applyAdminAllowList(signedInNoRole, null).publicMetadata), false);
+    assert.equal(hasAdminRole(applyAdminAllowList(signedInNoRole, undefined).publicMetadata), false);
+  });
+
+  it("leaves an existing metadata role untouched", () => {
+    process.env[KEY] = "someone-else@example.com";
+    const alreadyAdmin = signedIn({ role: "admin" });
+    const result = applyAdminAllowList(alreadyAdmin, "not-on-the-list@example.com");
+    assert.equal(hasAdminRole(result.publicMetadata), true);
   });
 });

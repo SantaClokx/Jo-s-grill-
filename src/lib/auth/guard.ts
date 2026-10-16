@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import { connection } from "next/server";
+import { NextResponse, connection } from "next/server";
 
 import { toAuthContext, type AuthContext } from "./authorization.ts";
 import { isClerkConfigured } from "./config.ts";
-import { decideAdminAccess, type AdminGuardResult } from "./decide.ts";
+import { applyAdminAllowList, decideAdminAccess, type AdminGuardResult } from "./decide.ts";
 
 export type { AdminGuardResult };
 
@@ -37,10 +37,17 @@ export async function readAuthContext(): Promise<AuthContext> {
   }
 
   const session = await auth();
-  return toAuthContext({
+  const context = toAuthContext({
     userId: session.userId,
     sessionClaims: session.sessionClaims,
   });
+
+  // The administrator allow-list is applied against the email in the
+  // server-verified session, never against anything the browser sends.
+  const email =
+    typeof session.sessionClaims?.email === "string" ? session.sessionClaims.email : null;
+
+  return applyAdminAllowList(context, email);
 }
 
 /**
@@ -53,4 +60,18 @@ export async function readAuthContext(): Promise<AuthContext> {
 export async function requireAdmin(): Promise<AdminGuardResult> {
   const context = await readAuthContext();
   return decideAdminAccess(context);
+}
+
+/**
+ * Turn a failed guard result into an HTTP response.
+ *
+ * One implementation shared by every admin API route so the status codes and the
+ * error body stay consistent and no route is tempted to improvise its own.
+ *
+ * The body carries the guard's already customer-safe message and nothing else:
+ * no stack trace, no user id, no internal state. In particular a `403` does not
+ * reveal whether the account exists or which role it lacks.
+ */
+export function guardFailureResponse(result: Extract<AdminGuardResult, { ok: false }>) {
+  return NextResponse.json({ error: result.message }, { status: result.status });
 }

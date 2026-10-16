@@ -1,4 +1,4 @@
-import { ADMIN_ROLE } from "./config.ts";
+import { ADMIN_ROLES } from "./config.ts";
 
 /**
  * Reading an administrator role out of Clerk metadata.
@@ -48,12 +48,13 @@ export function extractRole(publicMetadata: unknown): string | null {
 /**
  * Whether the metadata grants administrator access.
  *
- * Denies by default: missing metadata, an unexpected type, or no `admin` claim
- * all return false. The role must match exactly, so `administrator` or
- * `superadmin` do not count.
+ * Denies by default: missing metadata, an unexpected type, or no recognised
+ * role all return false. Roles must match exactly, so `administrator` or
+ * `superadmin` do not count unless they are listed in `ADMIN_ROLES`.
  */
 export function hasAdminRole(publicMetadata: unknown): boolean {
-  return extractRoles(publicMetadata).includes(ADMIN_ROLE);
+  const roles = extractRoles(publicMetadata);
+  return roles.some((role) => ADMIN_ROLES.includes(role));
 }
 
 /** The authentication state we act on, reduced to what the guards need. */

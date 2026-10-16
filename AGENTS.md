@@ -69,6 +69,13 @@ add Supabase or Firebase. The database provider for order persistence is a
   public site keeps working. `tests/auth.test.ts` guards this.
 - An admin role is trusted only from server-written `publicMetadata`
   (`sessionClaims.metadata`), never from a client claim.
+- The first administrator can also be granted through the server-only
+  `ADMIN_EMAILS` allow-list, matched only against the verified session email
+  (`sessionClaims.email`). This is a grant on top of `publicMetadata`, not a
+  replacement for it.
+- Sign-in lives at `/sign-in` (a plain route, not an optional catch-all: the
+  catch-all segment triggers Next's "Render in Browser" bailout for the shared
+  header). Clerk's `<SignIn />` is mounted client-only via `next/dynamic`.
 - See `docs/ADMIN-SECURITY.md` for the full requirements.
 
 ### `cacheComponents` and the admin route

@@ -1,7 +1,8 @@
 # Admin dashboard — security requirements
 
-Written before the dashboard exists, so the requirements are agreed in advance.
-Nothing here is implemented yet.
+The requirements were written before the dashboard existed, so they were agreed in
+advance. The **foundation** (authentication and authorization) is now implemented;
+the dashboard UI is still to be built. `IMPLEMENTED` marks what exists today.
 
 ## Repository visibility is not a security control
 
@@ -22,18 +23,23 @@ Two facts drive the requirements below:
 
 ### Authentication
 
-- Every admin API route authenticates **server-side on every request**. No
-  exceptions for routes that "only the dashboard calls".
-- Session state is validated server-side. A cookie or token is a claim, not
-  proof; verify it.
+- `IMPLEMENTED` Every admin API route authenticates **server-side on every request**. No
+  exceptions for routes that "only the dashboard calls". (`src/lib/auth/guard.ts`.)
+- `IMPLEMENTED` Session state is validated server-side. A cookie or token is a claim, not
+  proof; verify it. Verification is Clerk's (`auth()`), with no local fallback.
 - Passwords, if used, are hashed with a memory-hard algorithm (bcrypt, scrypt or
-  Argon2). Never store or log a plaintext password.
+  Argon2). Never store or log a plaintext password. Passwords never reach this
+  application: Clerk holds credentials, and no password is stored here.
 
 ### Authorization
 
-- Enforce role checks **on the server** for every privileged action. Checking a
-  role in the UI only hides a button; it does not prevent the request.
-- Deny by default. An unrecognised role gets nothing.
+- `IMPLEMENTED` Enforce role checks **on the server** for every privileged action.
+  Checking a role in the UI only hides a button; it does not prevent the request.
+- `IMPLEMENTED` Deny by default. An unrecognised role gets nothing. A missing Clerk
+  configuration is an explicit 503, never an implicit "no protection needed".
+- `IMPLEMENTED` The administrator role is read from `publicMetadata`, which only the
+  Clerk server SDK or Dashboard can write. The `ADMIN_EMAILS` allow-list is an
+  additional server-only grant, matched only against the verified session email.
 
 ### Secrets
 
@@ -47,8 +53,9 @@ Two facts drive the requirements below:
 
 ### Data
 
-- Customer orders are not collected until the database, authentication and
-  authorization above are all in place.
+- `IMPLEMENTED` Customer orders are not collected until the database, authentication and
+  authorization above are all in place. A database is required to store orders and
+  an admin session is required to read or change them.
 - Never log credentials, session tokens or full personal records.
 - Validate and sanitise all input server-side, including anything from the admin
   UI.
@@ -56,17 +63,19 @@ Two facts drive the requirements below:
 ### Transport and headers
 
 - HTTPS only (Vercel provides this).
-- Set a Content-Security-Policy once the dashboard exists, and keep the admin
-  area out of search engines (`X-Robots-Tag: noindex`).
-- Add rate limiting to authentication endpoints to blunt credential stuffing.
+- `IMPLEMENTED` Keep the admin area out of search engines: `/admin` and `/sign-in` set
+  `robots: noindex` metadata.
+- Set a Content-Security-Policy once the dashboard exists.
+- `OPEN` Add rate limiting to authentication endpoints to blunt credential stuffing.
+  Clerk exposes attack protection; this has not been configured yet.
 
 ## Review checklist
 
 Before the dashboard handles any real data:
 
-- [ ] Every admin route verified to reject unauthenticated requests.
-- [ ] Every privileged action verified to reject the wrong role.
+- [x] Every admin route verified to reject unauthenticated requests (`tests/auth.test.ts`).
+- [x] Every privileged action verified to reject the wrong role (`tests/auth.test.ts`).
 - [ ] No secret in the bundle — grep the built output, not just the source.
 - [ ] Full git history re-scanned for credentials.
 - [ ] Rate limiting on login.
-- [ ] Error messages reveal nothing about internal state.
+- [x] Error messages reveal nothing about internal state (`guardFailureResponse`).

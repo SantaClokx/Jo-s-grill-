@@ -2,6 +2,7 @@ import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 
 import type { DeliveryDetails, Order, OrderStatus } from "@/types";
 
+import { canTransition, isOrderStatus } from "../orders/status.ts";
 import { getDb } from "./client.ts";
 import { auditLog, orderItems, orders, type OrderItemRow } from "./schema/index.ts";
 
@@ -16,13 +17,7 @@ import { auditLog, orderItems, orders, type OrderItemRow } from "./schema/index.
  * stores what it is given and enforces the database constraints on top.
  */
 
-const ORDER_STATUSES: readonly OrderStatus[] = [
-  "received",
-  "confirmed",
-  "preparing",
-  "delivered",
-  "cancelled",
-];
+
 
 export interface PersistOrderInput {
   id: string;
@@ -89,9 +84,7 @@ function toDomainOrder(row: {
     reference: row.reference,
     createdAt: row.createdAt.toISOString(),
     // The column is constrained to the known set; narrow it for callers.
-    status: (ORDER_STATUSES as readonly string[]).includes(row.status)
-      ? (row.status as OrderStatus)
-      : "received",
+    status: isOrderStatus(row.status) ? row.status : "received",
     customer: {
       fullName: row.customerName,
       phone: row.customerPhone,
@@ -249,14 +242,17 @@ export async function listOrders(options: ListOrdersOptions = {}): Promise<Order
 }
 
 /**
- * Update an order's status. Returns the updated order, or null if no order has
- * that reference. Intended for the authenticated admin area only.
+ * Update an order's status unconditionally. Returns the updated order, or null
+ * if no order has that reference.
+ *
+ * Kept for callers that need a raw write; the admin API uses
+ * `transitionOrderStatus`, which additionally enforces the allowed transitions.
  */
 export async function updateOrderStatus(
   reference: string,
   status: OrderStatus,
 ): Promise<Order | null> {
-  if (!(ORDER_STATUSES as readonly string[]).includes(status)) {
+  if (!isOrderStatus(status)) {
     throw new OrderRepositoryError("Unknown order status.", "not_found");
   }
 
@@ -269,6 +265,60 @@ export async function updateOrderStatus(
 
   if (!updated) return null;
   return getOrderByReference(reference);
+}
+
+/**
+ * Apply a permitted status transition.
+ *
+ * The read and the write are made atomic by constraining the `update` on the
+ * status the caller believed was current (`expectedFrom`). If another request
+ * changed the status in between, the update matches no row and `conflict` is
+ * returned, so two concurrent administrators cannot both apply a transition and
+ * silently lose one of them.
+ */
+export type TransitionResult =
+  | { outcome: "updated"; order: Order }
+  | { outcome: "not_found" }
+  | { outcome: "conflict" }
+  | { outcome: "invalid_transition"; from: OrderStatus };
+
+export async function transitionOrderStatus(
+  reference: string,
+  nextStatus: OrderStatus,
+): Promise<TransitionResult> {
+  if (!isOrderStatus(nextStatus)) {
+    throw new OrderRepositoryError("Unknown order status.", "not_found");
+  }
+
+  const current = await getOrderByReference(reference);
+  if (!current) return { outcome: "not_found" };
+
+  if (!canTransition(current.status, nextStatus)) {
+    return { outcome: "invalid_transition", from: current.status };
+  }
+
+  // A no-op is not worth a write or an audit entry.
+  if (current.status === nextStatus) {
+    return { outcome: "updated", order: current };
+  }
+
+  const db = getDb();
+  const [updated] = await db
+    .update(orders)
+    .set({ status: nextStatus, updatedAt: new Date() })
+    .where(and(eq(orders.reference, reference), eq(orders.status, current.status)))
+    .returning({ id: orders.id });
+
+  if (!updated) {
+    // The row exists but its status changed under us.
+    return { outcome: "conflict" };
+  }
+
+  const reread = await getOrderByReference(reference);
+  if (!reread) {
+    throw new OrderRepositoryError("Order was updated but could not be read back.", "unavailable");
+  }
+  return { outcome: "updated", order: reread };
 }
 
 /**

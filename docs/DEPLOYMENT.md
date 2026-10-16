@@ -48,6 +48,15 @@ environment. Set these in **Settings → Environment Variables**:
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | browser-safe (public by design) | Clerk admin auth. |
 | `CLERK_SECRET_KEY` | server only | Clerk. Never `NEXT_PUBLIC_`. |
 | `DATABASE_URL` | server only | Neon **pooled** connection string. Never `NEXT_PUBLIC_`. |
+| `ADMIN_EMAILS` | server only | Optional. Comma-separated allow-list of administrator emails. Never `NEXT_PUBLIC_`. |
+
+The first administrator: set a role in the account's Clerk `publicMetadata`
+(`{"role":"admin"}`) from the Clerk Dashboard, **or** add the account's verified
+email to `ADMIN_EMAILS`. The metadata role is the primary mechanism; the
+allow-list exists so the owner can grant themselves access without writing
+metadata by hand, and is revoked by removing the address. An `ADMIN_EMAILS`
+entry is only ever matched against the server-verified session email, so a
+forged address in a request has no effect.
 
 Without Clerk keys, the public site works and the admin area is denied (503).
 Without `DATABASE_URL`, the site works and orders are not stored
