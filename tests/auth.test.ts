@@ -1,0 +1,213 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { ADMIN_ROLE } from "../src/lib/auth/config.ts";
+import { evaluateAdminAccess } from "../src/lib/auth/decide.ts";
+import {
+  extractRole,
+  hasAdminRole,
+  isAdmin,
+  toAuthContext,
+  type AuthContext,
+} from "../src/lib/auth/authorization.ts";
+
+/**
+ * These tests exercise the real allow/deny logic in `src/lib/auth`. Nothing is
+ * mocked: `evaluateAdminAccess` is a pure function, so the security decisions
+ * under test are the exact ones that run in production.
+ *
+ * What these tests do NOT prove: that a live Clerk instance returns the claims
+ * we expect. That requires real Clerk keys and a signed-in session, and is
+ * reported separately as NOT TESTED until credentials exist.
+ */
+
+const signedOut: AuthContext = {
+  isAuthenticated: false,
+  userId: null,
+  publicMetadata: null,
+};
+
+function signedIn(publicMetadata: unknown): AuthContext {
+  return { isAuthenticated: true, userId: "user_abc123", publicMetadata };
+}
+
+describe("administrator role extraction", () => {
+  it("recognises the plain role shape", () => {
+    assert.equal(extractRole({ role: ADMIN_ROLE }), "admin");
+    assert.equal(hasAdminRole({ role: ADMIN_ROLE }), true);
+  });
+
+  it("recognises the roles array shape", () => {
+    assert.equal(hasAdminRole({ roles: ["admin"] }), true);
+    assert.equal(hasAdminRole({ roles: ["customer", "admin"] }), true);
+  });
+
+  it("trims surrounding whitespace", () => {
+    assert.equal(hasAdminRole({ role: "  admin  " }), true);
+  });
+
+  it("denies an ordinary customer", () => {
+    assert.equal(hasAdminRole({ role: "customer" }), false);
+    assert.equal(extractRole({ role: "customer" }), "customer");
+  });
+
+  it("denies lookalike roles rather than matching substrings", () => {
+    assert.equal(hasAdminRole({ role: "administrator" }), false);
+    assert.equal(hasAdminRole({ role: "superadmin" }), false);
+    assert.equal(hasAdminRole({ role: "ADMIN" }), false);
+    assert.equal(hasAdminRole({ role: "admin.readonly" }), false);
+  });
+
+  it("denies malformed or missing metadata", () => {
+    assert.equal(hasAdminRole(null), false);
+    assert.equal(hasAdminRole(undefined), false);
+    assert.equal(hasAdminRole({}), false);
+    assert.equal(hasAdminRole("admin"), false);
+    assert.equal(hasAdminRole(42), false);
+    assert.equal(hasAdminRole([]), false);
+    assert.equal(hasAdminRole({ role: 123 }), false);
+    assert.equal(hasAdminRole({ roles: [] }), false);
+    assert.equal(hasAdminRole({ roles: [123, null] }), false);
+  });
+
+  it("isAdmin requires both a session and the role", () => {
+    assert.equal(isAdmin(signedIn({ role: "admin" })), true);
+    assert.equal(isAdmin(signedIn({ role: "customer" })), false);
+    assert.equal(isAdmin(signedOut), false);
+  });
+});
+
+describe("admin access decisions", () => {
+  it("grants access to a configured, signed-in administrator", () => {
+    const result = evaluateAdminAccess({
+      configured: true,
+      context: signedIn({ role: "admin" }),
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.userId, "user_abc123");
+  });
+
+  it("denies with 503 when Clerk is not configured", () => {
+    const result = evaluateAdminAccess({
+      configured: false,
+      context: signedIn({ role: "admin" }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "misconfigured");
+      assert.equal(result.status, 503);
+    }
+  });
+
+  it("never treats a missing configuration as a bypass", () => {
+    // Even a perfect administrator context is refused when unconfigured.
+    const asAdmin = evaluateAdminAccess({ configured: false, context: signedIn({ role: "admin" }) });
+    const anonymous = evaluateAdminAccess({ configured: false, context: signedOut });
+    assert.equal(asAdmin.ok, false);
+    assert.equal(anonymous.ok, false);
+  });
+
+  it("denies with 401 when signed out", () => {
+    const result = evaluateAdminAccess({ configured: true, context: signedOut });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "unauthenticated");
+      assert.equal(result.status, 401);
+    }
+  });
+
+  it("denies with 403 an authenticated non-administrator", () => {
+    const result = evaluateAdminAccess({
+      configured: true,
+      context: signedIn({ role: "customer" }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "forbidden");
+      assert.equal(result.status, 403);
+    }
+  });
+
+  it("denies an authenticated user with no role metadata at all", () => {
+    const result = evaluateAdminAccess({ configured: true, context: signedIn({}) });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "forbidden");
+  });
+
+  it("denies an authenticated user with tampered metadata types", () => {
+    for (const bad of [null, "admin", 1, [], { role: null }, { role: { nested: "admin" } }]) {
+      const result = evaluateAdminAccess({ configured: true, context: signedIn(bad) });
+      assert.equal(result.ok, false, `expected denial for metadata: ${JSON.stringify(bad)}`);
+    }
+  });
+
+  it("denies when isAuthenticated is true but no user id is present", () => {
+    const result = evaluateAdminAccess({
+      configured: true,
+      context: { isAuthenticated: true, userId: null, publicMetadata: { role: "admin" } },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "unauthenticated");
+  });
+});
+
+/**
+ * The mapping from Clerk's session shape into our decision input. This is the
+ * seam where a live session would be misread, so it is covered directly here
+ * even though the session itself is not mocked.
+ */
+describe("Clerk session to auth context", () => {
+  it("treats a null userId as signed out", () => {
+    assert.deepEqual(toAuthContext({ userId: null }), {
+      isAuthenticated: false,
+      userId: null,
+      publicMetadata: null,
+    });
+  });
+
+  it("treats an undefined userId as signed out", () => {
+    assert.equal(toAuthContext({ userId: undefined }).isAuthenticated, false);
+  });
+
+  it("carries the user id and metadata for a signed-in user", () => {
+    const context = toAuthContext({
+      userId: "user_123",
+      sessionClaims: { metadata: { role: "admin" } },
+    });
+    assert.deepEqual(context, {
+      isAuthenticated: true,
+      userId: "user_123",
+      publicMetadata: { role: "admin" },
+    });
+  });
+
+  it("defaults metadata to null when claims are absent", () => {
+    const context = toAuthContext({ userId: "user_123" });
+    assert.equal(context.publicMetadata, null);
+    assert.equal(isAdmin(context), false);
+  });
+
+  it("end to end: an admin session is granted, a customer session is not", () => {
+    const admin = toAuthContext({
+      userId: "user_admin",
+      sessionClaims: { metadata: { role: "admin" } },
+    });
+    const customer = toAuthContext({
+      userId: "user_cust",
+      sessionClaims: { metadata: { role: "customer" } },
+    });
+
+    assert.equal(evaluateAdminAccess({ configured: true, context: admin }).ok, true);
+    assert.equal(evaluateAdminAccess({ configured: true, context: customer }).ok, false);
+  });
+
+  it("end to end: an admin session is denied when Clerk is unconfigured", () => {
+    const admin = toAuthContext({
+      userId: "user_admin",
+      sessionClaims: { metadata: { role: "admin" } },
+    });
+    const result = evaluateAdminAccess({ configured: false, context: admin });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, "misconfigured");
+  });
+});

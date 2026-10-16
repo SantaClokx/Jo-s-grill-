@@ -55,6 +55,42 @@ Do **not** switch to `next/font/google`: it downloads fonts during `next build`,
 and a failed fetch aborts the build. This caused a real deployment failure.
 `tests/fonts.test.ts` guards against a regression.
 
+### Admin auth is Clerk, and it must stay fail-closed
+
+Authentication is Clerk (`@clerk/nextjs`), required by the project owner. Do not
+add Supabase or Firebase. The database provider for order persistence is a
+**separate, still-open decision**.
+
+- Clerk uses `src/proxy.ts`, not `middleware.ts` — Next 16 renamed the file.
+- `createRouteMatcher()` is deprecated. Admin protection does not rely on it: the
+  `/admin` layout and page both call `requireAdmin()` on the server.
+- Admin is deny-by-default. If Clerk keys are absent, admin returns an explicit
+  503 and denies access; it must never be treated as "no protection needed". The
+  public site keeps working. `tests/auth.test.ts` guards this.
+- An admin role is trusted only from server-written `publicMetadata`
+  (`sessionClaims.metadata`), never from a client claim.
+- See `docs/ADMIN-SECURITY.md` for the full requirements.
+
+### `cacheComponents` and the admin route
+
+The app enables `cacheComponents`, which prerenders a static shell for anything
+that does not read request-time data. This has two consequences that are easy to
+regress:
+
+- A synchronous admin component returning static JSX gets compiled into the
+  route's static shell, embedding privileged markup in the payload served to
+  anonymous visitors. An anonymous `GET /admin` must contain **none** of the
+  admin page's text. Both `src/app/admin/layout.tsx` and
+  `src/app/admin/page.tsx` set `export const instant = false` and each calls
+  `requireAdmin()` before constructing privileged markup.
+- `export const dynamic` is forbidden. `readAuthContext()` calls `connection()`
+  first so the unconfigured path still renders at request time rather than being
+  cached.
+
+Do not "simplify" the admin page by removing its self-guard or `instant = false`
+— a live build/curl check confirms that doing so leaks admin markup to anonymous
+visitors.
+
 ### Vercel blocks commits from unaffiliated authors
 
 On the Hobby plan, Vercel refuses to build a commit whose **author** lacks

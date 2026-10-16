@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
 import { CartProvider } from "@/components/cart-provider";
+import { ClerkProviderIfConfigured } from "@/components/clerk-provider";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { ToastProvider } from "@/components/toast";
@@ -73,11 +74,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </a>
         <ToastProvider>
           <CartProvider>
-            <Header />
-            <main id="main" className="flex-1">
-              {children}
-            </main>
-            <Footer />
+            <ClerkProviderIfConfigured>
+              <Header />
+              <main id="main" className="flex-1">
+                {children}
+              </main>
+              <Footer />
+            </ClerkProviderIfConfigured>
           </CartProvider>
         </ToastProvider>
       </body>
