@@ -48,7 +48,15 @@ export function AdminSignIn() {
 
   return (
     <div className="flex justify-center">
-      <ClerkSignIn />
+      <ClerkSignIn
+        fallbackRedirectUrl="/admin"
+        signUpUrl="/sign-in"
+        appearance={{
+          elements: {
+            card: "shadow-none",
+          },
+        }}
+      />
     </div>
   );
 }
