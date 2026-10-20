@@ -72,6 +72,13 @@ export function Header() {
             )}
           </Link>
 
+          <Link
+            href="/sign-in"
+            className="hidden rounded-lg px-3 py-2 text-sm font-bold text-ink transition-colors hover:bg-ink/5 lg:inline-flex"
+          >
+            Admin sign in
+          </Link>
+
           <ButtonLink href="/menu" className="hidden sm:inline-flex">
             Order now
           </ButtonLink>
@@ -106,6 +113,9 @@ export function Header() {
             ))}
             <Link href="/cart" className="rounded-lg px-3 py-3 text-base font-bold text-ink">
               Cart{isHydrated && count > 0 ? ` (${count})` : ""}
+            </Link>
+            <Link href="/sign-in" className="rounded-lg px-3 py-3 text-base font-bold text-ink">
+              Admin sign in
             </Link>
             <ButtonLink href="/menu" className="mt-3" size="lg">
               Order now
