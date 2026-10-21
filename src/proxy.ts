@@ -38,11 +38,22 @@ export default function proxy(request: NextRequest, event: Parameters<typeof wit
 }
 
 export const config = {
+  /**
+   * Next.js requires this array to be statically analysable, so it stays inline
+   * rather than imported from a shared module.
+   *
+   * `/__clerk/(.*)` is not optional. Clerk's Frontend API proxy serves Clerk's
+   * browser bundles from `/__clerk/npm/.../ *.js`, and the generic "skip static
+   * files" pattern below excludes every `.js` path. Without this entry the proxy
+   * never sees those requests, the bundle 404s, and the sign-in widget silently
+   * fails to mount - the page renders its heading and nothing else.
+   */
   matcher: [
-    // Skip Next.js internals and static files, unless they are found in search
-    // params (which means they are the target of a dynamic request).
+    // Skip Next.js internals and static files, unless found in search params.
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     // Always run for API routes.
     "/(api|trpc)(.*)",
+    // Always run for Clerk Frontend API proxy routes.
+    "/__clerk/(.*)",
   ],
 };
