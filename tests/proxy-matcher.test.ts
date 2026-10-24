@@ -4,7 +4,10 @@ import { describe, it } from "node:test";
 
 import {
   CLERK_PROXY_MATCHER_PATTERN,
+  CLERK_PROXY_PATH,
+  CLERK_PROXY_URL_ENV,
   matchesMatcher,
+  resolveClerkProxyUrl,
   routesClerkProxyRequests,
 } from "../src/lib/auth/proxy-matcher.ts";
 
@@ -49,5 +52,77 @@ describe("proxy middleware matcher", () => {
     for (const path of ["/", "/menu", "/sign-in", "/admin", "/api/admin/orders"]) {
       assert.equal(matchesMatcher(path, matcher), true, `${path} should match`);
     }
+  });
+});
+
+/**
+ * A second, independent failure produced the same symptom as the matcher bug.
+ *
+ * Clerk's browser bundle was being fetched from the publishable key's Frontend
+ * API domain (`https://clerk.jos-grill.vercel.app/npm/@clerk/ui@1/dist/ui.browser.js`)
+ * instead of through this app's own proxy. That domain does not resolve, so the
+ * widget failed with `failed_to_load_clerk_ui` even after the bundle proxy was
+ * fixed. Pinning `NEXT_PUBLIC_CLERK_PROXY_URL` to a relative path keeps the
+ * request same-origin.
+ */
+describe("Clerk proxy URL resolution", () => {
+  const LIVE_KEY = "pk_live_Y2xlcmsuam9zLWdyaWxsLnZlcmNlbC5hcHAk";
+  const DEV_KEY = "pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk";
+
+  it("returns an explicit root-relative proxy path unchanged", () => {
+    assert.equal(
+      resolveClerkProxyUrl({ [CLERK_PROXY_URL_ENV]: "/__clerk" }),
+      "/__clerk",
+    );
+  });
+
+  it("trims surrounding whitespace on an explicit value", () => {
+    assert.equal(
+      resolveClerkProxyUrl({ [CLERK_PROXY_URL_ENV]: "  /__clerk  " }),
+      "/__clerk",
+    );
+  });
+
+  it("prefers an explicit value over the default", () => {
+    assert.equal(
+      resolveClerkProxyUrl({
+        [CLERK_PROXY_URL_ENV]: "/custom-proxy",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: LIVE_KEY,
+      }),
+      "/custom-proxy",
+    );
+  });
+
+  it("defaults a live publishable key to the same-origin proxy path", () => {
+    // This is the actual fix: Clerk's own auto-proxy needs the server-only
+    // VERCEL_TARGET_ENV, which is absent during client hydration, so the client
+    // fell back to the publishable key's Frontend API domain and the UI bundle
+    // failed to load.
+    assert.equal(
+      resolveClerkProxyUrl({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: LIVE_KEY }),
+      CLERK_PROXY_PATH,
+    );
+  });
+
+  it("leaves a development publishable key alone", () => {
+    assert.equal(
+      resolveClerkProxyUrl({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: DEV_KEY }),
+      undefined,
+    );
+  });
+
+  it("returns undefined when no key and no explicit value are set", () => {
+    assert.equal(resolveClerkProxyUrl({}), undefined);
+    assert.equal(resolveClerkProxyUrl({ [CLERK_PROXY_URL_ENV]: "" }), undefined);
+    assert.equal(resolveClerkProxyUrl({ [CLERK_PROXY_URL_ENV]: "   " }), undefined);
+  });
+
+  it("keeps the configured path in step with the middleware matcher", () => {
+    const matcher = readDeclaredMatcher();
+    assert.equal(
+      matchesMatcher(`${CLERK_PROXY_PATH}/npm/@clerk/ui@1/dist/ui.browser.js`, matcher),
+      true,
+      "the proxy path the client is given must be routed through the middleware",
+    );
   });
 });
