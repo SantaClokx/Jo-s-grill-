@@ -7,6 +7,7 @@ import {
   extractRole,
   hasAdminRole,
   isAdmin,
+  primaryEmail,
   toAuthContext,
   type AuthContext,
 } from "../src/lib/auth/authorization.ts";
@@ -25,10 +26,11 @@ const signedOut: AuthContext = {
   isAuthenticated: false,
   userId: null,
   publicMetadata: null,
+  email: null,
 };
 
-function signedIn(publicMetadata: unknown): AuthContext {
-  return { isAuthenticated: true, userId: "user_abc123", publicMetadata };
+function signedIn(publicMetadata: unknown, email: string | null = null): AuthContext {
+  return { isAuthenticated: true, userId: "user_abc123", publicMetadata, email };
 }
 
 describe("administrator role extraction", () => {
@@ -144,7 +146,7 @@ describe("admin access decisions", () => {
   it("denies when isAuthenticated is true but no user id is present", () => {
     const result = evaluateAdminAccess({
       configured: true,
-      context: { isAuthenticated: true, userId: null, publicMetadata: { role: "admin" } },
+      context: { isAuthenticated: true, userId: null, publicMetadata: { role: "admin" }, email: null },
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, "unauthenticated");
@@ -162,6 +164,7 @@ describe("Clerk session to auth context", () => {
       isAuthenticated: false,
       userId: null,
       publicMetadata: null,
+      email: null,
     });
   });
 
@@ -178,13 +181,52 @@ describe("Clerk session to auth context", () => {
       isAuthenticated: true,
       userId: "user_123",
       publicMetadata: { role: "admin" },
+      email: null,
     });
   });
 
-  it("defaults metadata to null when claims are absent", () => {
+  it("carries the email when the token has the custom claim", () => {
+    const context = toAuthContext({
+      userId: "user_123",
+      sessionClaims: { email: "owner@example.com" },
+    });
+    assert.equal(context.email, "owner@example.com");
+  });
+
+  it("defaults metadata and email to null when claims are absent", () => {
     const context = toAuthContext({ userId: "user_123" });
     assert.equal(context.publicMetadata, null);
+    assert.equal(context.email, null);
     assert.equal(isAdmin(context), false);
+  });
+
+  /**
+   * Regression: `metadata` and `email` are not Clerk *default* session claims.
+   * A stock session token carries neither, so a decision made from the token
+   * alone refused every signed-in account. `toAuthContext` must leave both null
+   * in that case (the guard fills them from the backend API), and null must
+   * deny - never be read as a grant.
+   */
+  it("regression: a stock session token carries no role and is denied", () => {
+    const context = toAuthContext({
+      userId: "user_123",
+      // The real default claim set, verbatim from Clerk's session-token docs.
+      sessionClaims: {
+        azp: "https://jos-grill.vercel.app",
+        exp: 1713158400,
+        fva: [5, -1],
+        iat: 1713154800,
+        iss: "https://clerk.jos-grill.vercel.app",
+        nbf: 1713154790,
+        sid: "sess_abc",
+        sub: "user_123",
+        v: 2,
+      },
+    });
+
+    assert.equal(context.publicMetadata, null);
+    assert.equal(context.email, null);
+    assert.equal(evaluateAdminAccess({ configured: true, context }).ok, false);
   });
 
   it("end to end: an admin session is granted, a customer session is not", () => {
@@ -212,6 +254,54 @@ describe("Clerk session to auth context", () => {
   });
 });
 
+describe("primary email resolution", () => {
+  it("prefers the address Clerk marks as primary", () => {
+    assert.equal(
+      primaryEmail({
+        primaryEmailAddress: { emailAddress: "primary@example.com" },
+        emailAddresses: [{ emailAddress: "other@example.com", verification: { status: "verified" } }],
+      }),
+      "primary@example.com",
+    );
+  });
+
+  it("falls back to the first verified address when none is primary", () => {
+    assert.equal(
+      primaryEmail({
+        primaryEmailAddress: null,
+        emailAddresses: [
+          { emailAddress: "unverified@example.com", verification: { status: "unverified" } },
+          { emailAddress: "verified@example.com", verification: { status: "verified" } },
+        ],
+      }),
+      "verified@example.com",
+    );
+  });
+
+  it("returns null when no email can be established", () => {
+    assert.equal(primaryEmail({}), null);
+    assert.equal(primaryEmail({ primaryEmailAddress: null, emailAddresses: [] }), null);
+    assert.equal(
+      primaryEmail({
+        emailAddresses: [{ emailAddress: "unverified@example.com", verification: { status: "unverified" } }],
+      }),
+      null,
+    );
+  });
+
+  it("ignores an empty or whitespace-only primary address", () => {
+    assert.equal(primaryEmail({ primaryEmailAddress: { emailAddress: "   " } }), null);
+    assert.equal(primaryEmail({ primaryEmailAddress: { emailAddress: "" } }), null);
+  });
+
+  it("never treats an unresolved email as an allow-list match", () => {
+    process.env.ADMIN_EMAILS = "owner@example.com";
+    const elevated = applyAdminAllowList(signedIn(null), primaryEmail({}));
+    assert.equal(evaluateAdminAccess({ configured: true, context: elevated }).ok, false);
+    delete process.env.ADMIN_EMAILS;
+  });
+});
+
 /**
  * The administrator allow-list, applied to the verified session.
  *
@@ -232,6 +322,7 @@ describe("administrator allow-list elevation", () => {
     isAuthenticated: true,
     userId: "user_owner",
     publicMetadata: null,
+    email: "santus4jah@gmail.com",
   };
 
   it("grants access to the allow-listed email", () => {

@@ -70,9 +70,19 @@ add Supabase or Firebase. The database provider for order persistence is a
 - An admin role is trusted only from server-written `publicMetadata`
   (`sessionClaims.metadata`), never from a client claim.
 - The first administrator can also be granted through the server-only
-  `ADMIN_EMAILS` allow-list, matched only against the verified session email
-  (`sessionClaims.email`). This is a grant on top of `publicMetadata`, not a
-  replacement for it.
+  `ADMIN_EMAILS` allow-list, matched only against the verified session email.
+  This is a grant on top of `publicMetadata`, not a replacement for it.
+- **`metadata` and `email` are not Clerk default session claims.** A stock
+  session token carries only `azp, exp, fva, iat, iss, nbf, sid, sub, v, o, pla,
+  fea, sts, act`. Reading either from `sessionClaims` alone returns nothing and
+  refuses every signed-in account with a 403, which is a real bug this repo
+  shipped once. `readAuthContext()` therefore resolves both from Clerk's backend
+  API (`clerkClient().users.getUser`) and treats the token as an optimisation for
+  projects that have been configured to include the claims. Do not "simplify"
+  this back to claims-only. `tests/auth.test.ts` pins the default-claim shape.
+- Resolving metadata from the backend API means the `publicMetadata` role must be
+  set for the account; a project that never sets it relies on `ADMIN_EMAILS`.
+  See `docs/ADMIN-SECURITY.md` for how to grant the first administrator.
 - Sign-in lives at `/sign-in` (a plain route, not an optional catch-all: the
   catch-all segment triggers Next's "Render in Browser" bailout for the shared
   header). Clerk's `<SignIn />` is mounted client-only via `next/dynamic`.
