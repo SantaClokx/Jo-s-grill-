@@ -64,6 +64,38 @@ export interface AuthContext {
   userId: string | null;
   /** Server-written metadata, or null when signed out. */
   publicMetadata: unknown;
+  /**
+   * The account's email address.
+   *
+   * Deliberately *not* read from the session token. `email` and `metadata` are
+   * not among Clerk's default claims, so neither is present in a stock session
+   * token - see `readAuthContext()`, which resolves both from Clerk's backend
+   * API instead of trusting the token to carry them.
+   */
+  email: string | null;
+}
+
+/**
+ * Find the account's primary email address.
+ *
+ * Prefers the address Clerk marks as primary and falls back to the first
+ * verified address. Returns null when the account has no email, which denies
+ * access rather than guessing.
+ */
+export function primaryEmail(user: {
+  primaryEmailAddress?: { emailAddress?: string | null } | null;
+  emailAddresses?: Array<{ emailAddress?: string | null; verification?: { status?: string | null } | null }>;
+}): string | null {
+  const primary = user.primaryEmailAddress?.emailAddress;
+  if (typeof primary === "string" && primary.trim() !== "") return primary.trim();
+
+  for (const entry of user.emailAddresses ?? []) {
+    const address = entry?.emailAddress;
+    const verified = entry?.verification?.status === "verified";
+    if (verified && typeof address === "string" && address.trim() !== "") return address.trim();
+  }
+
+  return null;
 }
 
 /** Signed in *and* carrying the administrator role. */
@@ -89,18 +121,24 @@ export function toAuthContext(session: {
   sessionClaims?: unknown;
 }): AuthContext {
   if (!session.userId) {
-    return { isAuthenticated: false, userId: null, publicMetadata: null };
+    return { isAuthenticated: false, userId: null, publicMetadata: null, email: null };
   }
 
-  const claims = session.sessionClaims;
-  const metadata =
-    typeof claims === "object" && claims !== null
-      ? (claims as { metadata?: unknown }).metadata
+  const claims =
+    typeof session.sessionClaims === "object" && session.sessionClaims !== null
+      ? (session.sessionClaims as { metadata?: unknown; email?: unknown })
       : undefined;
+
+  // Both fields are custom claims. They are used when a project has been
+  // configured to include them; otherwise the backend API fills them in. A
+  // missing value is null, never a reason to grant access.
+  const email =
+    typeof claims?.email === "string" && claims.email.trim() !== "" ? claims.email.trim() : null;
 
   return {
     isAuthenticated: true,
     userId: session.userId,
-    publicMetadata: metadata ?? null,
+    publicMetadata: claims?.metadata ?? null,
+    email,
   };
 }

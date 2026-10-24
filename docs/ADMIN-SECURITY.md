@@ -41,6 +41,38 @@ Two facts drive the requirements below:
   Clerk server SDK or Dashboard can write. The `ADMIN_EMAILS` allow-list is an
   additional server-only grant, matched only against the verified session email.
 
+## Granting the first administrator
+
+Signing in is not the same as being an administrator. A signed-in account with no
+grant is refused with `403 Administrator access required`, which is the guard
+working correctly. There are two ways to grant access; pick one.
+
+**Option A — `ADMIN_EMAILS` (no Dashboard claim changes).**
+
+1. In Vercel, **Settings → Environment Variables**, add `ADMIN_EMAILS` set to the
+   owner's sign-in address (comma-separated for several). Do not prefix it with
+   `NEXT_PUBLIC_`.
+2. Redeploy so the new variable is present, then sign out and back in.
+
+The address is matched against the account's own email as returned by Clerk's
+backend API, so it must be the address on the Clerk user, not an alias.
+
+**Option B — `publicMetadata` role (per-account, no redeploy).**
+
+In the Clerk Dashboard, open the user → **Metadata → Public** and set:
+
+```json
+{ "role": "admin" }
+```
+
+The guard reads this from the backend API, so it takes effect on the next
+request. `ADMIN_ROLES` in `src/lib/auth/config.ts` lists the accepted values;
+only an exact `admin` matches.
+
+**Do not** add `metadata` or `email` to the session token as a substitute for
+either option. Those are not Clerk default claims, and the guard no longer
+depends on them — see `AGENTS.md` for the failure this caused.
+
 ### Secrets
 
 - All credentials live in Vercel **Settings → Environment Variables**. Never in

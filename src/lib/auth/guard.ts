@@ -1,7 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse, connection } from "next/server";
 
-import { toAuthContext, type AuthContext } from "./authorization.ts";
+import { primaryEmail, toAuthContext, type AuthContext } from "./authorization.ts";
 import { isClerkConfigured } from "./config.ts";
 import { applyAdminAllowList, decideAdminAccess, type AdminGuardResult } from "./decide.ts";
 
@@ -19,6 +19,41 @@ export type { AdminGuardResult };
  */
 
 /**
+ * Fill in the account's metadata and email from Clerk's backend API.
+ *
+ * Both are needed to decide access and neither is a Clerk *default* session
+ * claim: a stock session token contains only `azp, exp, fva, iat, iss, nbf, sid,
+ * sub, v, o, pla, fea, sts, act`. Reading them from `sessionClaims` alone
+ * therefore always came back empty, which refused every signed-in account with
+ * a 403 and made the `ADMIN_EMAILS` allow-list unreachable.
+ *
+ * The backend API is authoritative and needs no Dashboard claim configuration,
+ * so it is used for whichever value the token did not carry. The session token
+ * is still preferred when a project has been configured to include the claims,
+ * which avoids a round trip.
+ */
+async function resolveAccount(context: AuthContext): Promise<AuthContext> {
+  if (!context.isAuthenticated || !context.userId) return context;
+  if (context.publicMetadata !== null && context.email !== null) return context;
+
+  try {
+    const client = await clerkClient();
+    const user = await client.users.getUser(context.userId);
+
+    return {
+      ...context,
+      publicMetadata: context.publicMetadata ?? user.publicMetadata ?? null,
+      email: context.email ?? primaryEmail(user),
+    };
+  } catch {
+    // Fail closed. An unreachable Clerk backend must never be read as "this
+    // account is probably fine" - the account simply stays unprivileged and the
+    // caller receives the ordinary 403.
+    return context;
+  }
+}
+
+/**
  * Read the current Clerk session into the reduced context the guard needs.
  *
  * `await connection()` is load-bearing. With `cacheComponents` enabled, Next.js
@@ -33,21 +68,21 @@ export async function readAuthContext(): Promise<AuthContext> {
   await connection();
 
   if (!isClerkConfigured()) {
-    return { isAuthenticated: false, userId: null, publicMetadata: null };
+    return { isAuthenticated: false, userId: null, publicMetadata: null, email: null };
   }
 
   const session = await auth();
-  const context = toAuthContext({
-    userId: session.userId,
-    sessionClaims: session.sessionClaims,
-  });
+  const context = await resolveAccount(
+    toAuthContext({
+      userId: session.userId,
+      sessionClaims: session.sessionClaims,
+    }),
+  );
 
-  // The administrator allow-list is applied against the email in the
-  // server-verified session, never against anything the browser sends.
-  const email =
-    typeof session.sessionClaims?.email === "string" ? session.sessionClaims.email : null;
-
-  return applyAdminAllowList(context, email);
+  // The allow-list is applied against the account's own email, which came from
+  // the server-verified session or Clerk's backend API. It is never taken from
+  // anything the browser sends.
+  return applyAdminAllowList(context, context.email);
 }
 
 /**
