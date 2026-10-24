@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { AdminSessionControls } from "@/components/admin/admin-session-controls";
+import { isClerkConfigured } from "@/lib/auth/config";
 import { requireAdmin } from "@/lib/auth/guard";
 
 /**
@@ -30,7 +31,17 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-function Denied({ title, detail, status }: { title: string; detail: string; status: number }) {
+function Denied({
+  title,
+  detail,
+  status,
+  action,
+}: {
+  title: string;
+  detail: string;
+  status: number;
+  action?: ReactNode;
+}) {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-20">
       <p className="text-sm font-bold uppercase tracking-wide text-ink/60">
@@ -38,12 +49,15 @@ function Denied({ title, detail, status }: { title: string; detail: string; stat
       </p>
       <h1 className="text-3xl font-extrabold text-ink">{title}</h1>
       <p className="text-ink/80">{detail}</p>
-      <Link
-        href="/"
-        className="mt-2 w-fit rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white"
-      >
-        Back to the website
-      </Link>
+      <div className="mt-2 flex flex-wrap gap-3">
+        {action}
+        <Link
+          href="/"
+          className="w-fit rounded-lg border border-ink/20 px-4 py-2 text-sm font-bold text-ink"
+        >
+          Back to the website
+        </Link>
+      </div>
     </div>
   );
 }
@@ -67,6 +81,16 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           status={result.status}
           title="Sign in required"
           detail="You must be signed in with an administrator account to view this area."
+          action={
+            isClerkConfigured() ? (
+              <Link
+                href="/sign-in"
+                className="w-fit rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white"
+              >
+                Sign in
+              </Link>
+            ) : null
+          }
         />
       );
     }

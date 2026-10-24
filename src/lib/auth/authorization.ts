@@ -49,12 +49,42 @@ export function extractRole(publicMetadata: unknown): string | null {
  * Whether the metadata grants administrator access.
  *
  * Denies by default: missing metadata, an unexpected type, or no recognised
- * role all return false. Roles must match exactly, so `administrator` or
- * `superadmin` do not count unless they are listed in `ADMIN_ROLES`.
+ * role all return false. Matching is case-insensitive and whitespace-trimmed,
+ * because the value is typed by hand into the Clerk Dashboard and `Admin` is
+ * the same role as `admin`. It is still an *exact* match rather than a
+ * substring test: `"not-admin".includes("admin")` is true, so a substring test
+ * would grant access to an account deliberately labelled as a non-admin.
+ * `administrator` is accepted as an unambiguous synonym.
  */
 export function hasAdminRole(publicMetadata: unknown): boolean {
-  const roles = extractRoles(publicMetadata);
-  return roles.some((role) => ADMIN_ROLES.includes(role));
+  const roles = extractRoles(publicMetadata).map((role) => role.toLowerCase());
+  return ADMIN_ROLES.some((allowed) => {
+    const normalised = allowed.toLowerCase();
+    return roles.includes(normalised) || roles.includes(`${normalised}istrator`);
+  });
+}
+
+/**
+ * Choose which metadata snapshot the access decision should use.
+ *
+ * The session token and the backend API can disagree. A token's `metadata`
+ * claim is a snapshot from when the session was minted, so an account promoted
+ * in the Dashboard keeps the old value until its token is refreshed - the
+ * account is refused with a 403 even though the role is now correct. The
+ * backend is always authoritative and freshly fetched.
+ *
+ * The backend value therefore wins whenever it grants access. When it does not,
+ * the token's value is kept instead of being overwritten with an empty result,
+ * so a project that carries the role only as a token claim keeps working.
+ * Preferring the *granting* value is safe here because both sources are
+ * server-controlled: neither is readable or writable from the browser.
+ */
+export function resolveMetadataPreference(input: {
+  tokenMetadata: unknown;
+  backendMetadata: unknown;
+}): unknown {
+  const { tokenMetadata, backendMetadata } = input;
+  return hasAdminRole(backendMetadata) ? backendMetadata : (tokenMetadata ?? backendMetadata);
 }
 
 /** The authentication state we act on, reduced to what the guards need. */

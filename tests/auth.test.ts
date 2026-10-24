@@ -8,6 +8,7 @@ import {
   hasAdminRole,
   isAdmin,
   primaryEmail,
+  resolveMetadataPreference,
   toAuthContext,
   type AuthContext,
 } from "../src/lib/auth/authorization.ts";
@@ -48,16 +49,27 @@ describe("administrator role extraction", () => {
     assert.equal(hasAdminRole({ role: "  admin  " }), true);
   });
 
+  it("matches regardless of case", () => {
+    assert.equal(hasAdminRole({ role: "ADMIN" }), true);
+    assert.equal(hasAdminRole({ role: "Admin" }), true);
+    assert.equal(hasAdminRole({ roles: ["Admin"] }), true);
+  });
+
+  it("accepts 'administrator' as an unambiguous synonym", () => {
+    assert.equal(hasAdminRole({ role: "administrator" }), true);
+    assert.equal(hasAdminRole({ role: "Administrator" }), true);
+  });
+
   it("denies an ordinary customer", () => {
     assert.equal(hasAdminRole({ role: "customer" }), false);
     assert.equal(extractRole({ role: "customer" }), "customer");
   });
 
   it("denies lookalike roles rather than matching substrings", () => {
-    assert.equal(hasAdminRole({ role: "administrator" }), false);
     assert.equal(hasAdminRole({ role: "superadmin" }), false);
-    assert.equal(hasAdminRole({ role: "ADMIN" }), false);
     assert.equal(hasAdminRole({ role: "admin.readonly" }), false);
+    assert.equal(hasAdminRole({ role: "not-admin" }), false);
+    assert.equal(hasAdminRole({ role: "administrate" }), false);
   });
 
   it("denies malformed or missing metadata", () => {
@@ -76,6 +88,47 @@ describe("administrator role extraction", () => {
     assert.equal(isAdmin(signedIn({ role: "admin" })), true);
     assert.equal(isAdmin(signedIn({ role: "customer" })), false);
     assert.equal(isAdmin(signedOut), false);
+  });
+});
+
+describe("metadata snapshot preference", () => {
+  it("prefers the backend value when the token snapshot is stale", () => {
+    // The reported failure: the role was granted in the Dashboard, but the
+    // session token still carries the metadata minted before that change.
+    const chosen = resolveMetadataPreference({
+      tokenMetadata: { role: "customer" },
+      backendMetadata: { role: "admin" },
+    });
+    assert.equal(hasAdminRole(chosen), true);
+  });
+
+  it("prefers the backend value when the token carried no metadata at all", () => {
+    const chosen = resolveMetadataPreference({
+      tokenMetadata: null,
+      backendMetadata: { role: "admin" },
+    });
+    assert.equal(hasAdminRole(chosen), true);
+  });
+
+  it("keeps the token value when the backend does not grant access", () => {
+    // A project may carry the role only as a token claim; an empty backend
+    // response must not silently revoke it.
+    const chosen = resolveMetadataPreference({
+      tokenMetadata: { role: "admin" },
+      backendMetadata: {},
+    });
+    assert.equal(hasAdminRole(chosen), true);
+  });
+
+  it("does not manufacture access when neither source grants it", () => {
+    for (const input of [
+      { tokenMetadata: null, backendMetadata: null },
+      { tokenMetadata: { role: "customer" }, backendMetadata: { role: "customer" } },
+      { tokenMetadata: undefined, backendMetadata: undefined },
+      { tokenMetadata: { role: "admin.readonly" }, backendMetadata: { roles: ["customer"] } },
+    ]) {
+      assert.equal(hasAdminRole(resolveMetadataPreference(input)), false);
+    }
   });
 });
 
