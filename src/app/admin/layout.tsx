@@ -81,7 +81,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <div className="mx-auto w-full max-w-4xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <Link href="/admin" className="text-sm font-bold uppercase tracking-wide text-ink/60">
           JO&apos;S Grill admin
         </Link>
