@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { AdminOrderDashboard } from "@/components/admin/admin-order-dashboard";
-import { isClerkConfigured } from "@/lib/auth/config";
 import { requireAdmin } from "@/lib/auth/guard";
 
 export const instant = false;
@@ -9,6 +8,11 @@ export const instant = false;
 export default async function AdminHomePage() {
   const result = await requireAdmin();
 
+  // The layout already renders the full denial screen for every failure reason,
+  // so this branch is unreachable in practice. It is kept as a defensive
+  // fallback in case the page is ever rendered outside that layout, and it
+  // deliberately carries no sign-in call to action of its own - duplicating the
+  // layout's would show two of them.
   if (!result.ok) {
     return (
       <div className="flex flex-col gap-4">
@@ -18,7 +22,6 @@ export default async function AdminHomePage() {
         </h1>
         <p className="text-ink/80">{result.message}</p>
         <div className="flex flex-wrap gap-3">
-          {result.reason === "unauthenticated" && isClerkConfigured() ? <Link href="/sign-in" className="w-fit rounded-lg bg-ink px-4 py-2 text-sm font-bold text-white">Sign in</Link> : null}
           <Link href="/" className="w-fit rounded-lg border border-ink/20 px-4 py-2 text-sm font-bold text-ink">Back to the website</Link>
         </div>
       </div>

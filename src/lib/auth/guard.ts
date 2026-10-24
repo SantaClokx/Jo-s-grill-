@@ -1,7 +1,13 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { NextResponse, connection } from "next/server";
 
-import { primaryEmail, toAuthContext, type AuthContext } from "./authorization.ts";
+import {
+  hasAdminRole,
+  primaryEmail,
+  resolveMetadataPreference,
+  toAuthContext,
+  type AuthContext,
+} from "./authorization.ts";
 import { isClerkConfigured } from "./config.ts";
 import { applyAdminAllowList, decideAdminAccess, type AdminGuardResult } from "./decide.ts";
 
@@ -27,22 +33,38 @@ export type { AdminGuardResult };
  * therefore always came back empty, which refused every signed-in account with
  * a 403 and made the `ADMIN_EMAILS` allow-list unreachable.
  *
- * The backend API is authoritative and needs no Dashboard claim configuration,
- * so it is used for whichever value the token did not carry. The session token
- * is still preferred when a project has been configured to include the claims,
- * which avoids a round trip.
+ * A token *can* carry a `metadata` custom claim if a project adds one via a JWT
+ * template. That value is a snapshot taken when the session was minted, so it
+ * goes stale the moment an administrator changes a role in the Dashboard: the
+ * old token keeps its old metadata until it is refreshed, and the account is
+ * refused with a 403 even though the role is now correct. The backend API is
+ * always authoritative and needs no Dashboard claim configuration, so it is
+ * consulted whenever it might change the outcome - specifically when the token
+ * does not already grant access. An unreachable backend fails closed.
  */
 async function resolveAccount(context: AuthContext): Promise<AuthContext> {
   if (!context.isAuthenticated || !context.userId) return context;
-  if (context.publicMetadata !== null && context.email !== null) return context;
+
+  // Fast path: the token already carries a usable answer, so no round trip is
+  // needed. `hasAdminRole` is the only decision that matters, and the email is
+  // only consulted by the allow-list, which cannot apply to an existing admin.
+  if (hasAdminRole(context.publicMetadata) && context.email !== null) return context;
 
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(context.userId);
 
+    const fromBackend = user.publicMetadata ?? null;
+
     return {
       ...context,
-      publicMetadata: context.publicMetadata ?? user.publicMetadata ?? null,
+      // See `resolveMetadataPreference`: the freshly fetched metadata wins
+      // whenever it grants access, so a stale token snapshot cannot keep a
+      // legitimately promoted account out.
+      publicMetadata: resolveMetadataPreference({
+        tokenMetadata: context.publicMetadata,
+        backendMetadata: fromBackend,
+      }),
       email: context.email ?? primaryEmail(user),
     };
   } catch {
