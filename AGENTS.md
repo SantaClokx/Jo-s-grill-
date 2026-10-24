@@ -78,6 +78,37 @@ add Supabase or Firebase. The database provider for order persistence is a
   header). Clerk's `<SignIn />` is mounted client-only via `next/dynamic`.
 - See `docs/ADMIN-SECURITY.md` for the full requirements.
 
+#### The Clerk proxy needs both the matcher entry and a client `proxyUrl`
+
+Two separate faults produced the same symptom — the sign-in page renders its
+heading but never mounts the widget. Fixing one alone does not help:
+
+1. **Middleware matcher.** Clerk's proxy serves its browser bundles from
+   `/__clerk/npm/.../*.js`. The generic "skip static files" matcher pattern
+   excludes every `.js` path, so `/__clerk/(.*)` must be listed explicitly in
+   `config.matcher` (`src/proxy.ts`). Without it the bundle 404s.
+2. **Client proxy URL.** Clerk's auto-proxy derives its path from
+   `VERCEL_TARGET_ENV`, which is **server-only**. During a static prerender the
+   server emits `data-clerk-proxy-url="/__clerk"` into the HTML, but the client
+   hydration recomputes the value, finds no `VERCEL_TARGET_ENV`, and falls back
+   to the publishable key's Frontend API domain (`clerk.jos-grill.vercel.app`).
+   That host does not serve the bundle, so clerk-js fails with
+   `failed_to_load_clerk_ui` (`net::ERR_CONNECTION_CLOSED`).
+
+   `src/components/clerk-provider.tsx` therefore passes `proxyUrl` explicitly,
+   defaulting a `pk_live_` key to `/__clerk`. `NEXT_PUBLIC_CLERK_PROXY_URL`
+   overrides it. Both values must be read as explicit
+   `process.env.NEXT_PUBLIC_*` literals — that is the only form Next.js inlines
+   into client code, and a dynamic lookup is empty in the browser, which
+   reintroduces the same fault.
+
+Verify a fix by checking the widget actually mounts, not just that the script
+returns 200. A page can serve the bundle and still render an empty widget.
+
+Do not add the Vercel preview domain to Clerk: Clerk rejects unregistered
+hostnames with `host_invalid`. Preview deploys are not sign-in testable;
+production is.
+
 ### `cacheComponents` and the admin route
 
 The app enables `cacheComponents`, which prerenders a static shell for anything
